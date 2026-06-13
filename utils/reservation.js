@@ -26,7 +26,7 @@ function hasTimeConflict(roomId, startDatetime, endDatetime, excludeId = null) {
 function calculateExpireAt(startDatetime) {
   const start = new Date(startDatetime);
   const expire = new Date(start.getTime() + EXPIRE_AFTER_START_MINUTES * 60 * 1000);
-  return expire.toISOString().replace('T', ' ').slice(0, 19);
+  return expire.toISOString();
 }
 
 const RESERVATION_STATUSES = {

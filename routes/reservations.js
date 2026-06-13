@@ -156,17 +156,30 @@ router.post('/:id/checkin', authenticateToken, (req, res) => {
     return res.status(403).json({ error: '无权为此预约签到' });
   }
 
+  const now = new Date();
+
   if (reservation.status !== RESERVATION_STATUSES.APPROVED) {
+    logAudit(req.user.id, ACTIONS.CHECKIN_FAILED, {
+      reservationId: id,
+      oldStatus: reservation.status,
+      newStatus: reservation.status,
+      details: { reason: 'invalid_status', current_status: reservation.status, checkin_time: now.toISOString() }
+    });
     return res.status(400).json({ error: `当前状态为 ${reservation.status}，无法签到` });
   }
 
-  const now = new Date();
   const start = new Date(reservation.start_datetime);
   const { CHECKIN_GRACE_MINUTES } = require('../config');
   const graceStart = new Date(start.getTime() - CHECKIN_GRACE_MINUTES * 60 * 1000);
   const expireAt = new Date(reservation.expire_at);
 
   if (now < graceStart) {
+    logAudit(req.user.id, ACTIONS.CHECKIN_FAILED, {
+      reservationId: id,
+      oldStatus: reservation.status,
+      newStatus: reservation.status,
+      details: { reason: 'too_early', checkin_time: now.toISOString(), earliest_checkin: graceStart.toISOString() }
+    });
     return res.status(400).json({ 
       error: '签到时间未到',
       earliest_checkin: graceStart.toISOString()
@@ -174,6 +187,12 @@ router.post('/:id/checkin', authenticateToken, (req, res) => {
   }
 
   if (now > expireAt) {
+    logAudit(req.user.id, ACTIONS.CHECKIN_FAILED, {
+      reservationId: id,
+      oldStatus: reservation.status,
+      newStatus: reservation.status,
+      details: { reason: 'expired', checkin_time: now.toISOString(), expire_at: expireAt.toISOString() }
+    });
     return res.status(400).json({ 
       error: '预约已超时失效，无法签到',
       expired_at: expireAt.toISOString()

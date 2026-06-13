@@ -16,9 +16,10 @@ router.get('/', authenticateToken, requireAdmin, (req, res) => {
   let params = [];
 
   if (active === 'true') {
-    const now = new Date().toISOString().split('T')[0];
+    const { getLocalDateStr } = require('../utils/blacklist');
+    const today = getLocalDateStr();
     sql += ` WHERE (b.is_permanent = 1 OR (b.start_date <= ? AND (b.end_date IS NULL OR b.end_date >= ?)))`;
-    params = [now, now];
+    params = [today, today];
   }
   sql += ' ORDER BY b.created_at DESC';
 

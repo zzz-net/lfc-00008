@@ -3,7 +3,7 @@ const { logAudit, ACTIONS } = require('../utils/audit');
 const { RESERVATION_STATUSES, canTransition } = require('../utils/reservation');
 
 function processExpiredReservations() {
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const now = new Date().toISOString();
   
   const expired = all(
     `SELECT * FROM reservations 
@@ -42,7 +42,7 @@ function processExpiredReservations() {
 }
 
 function processCompletedReservations() {
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const now = new Date().toISOString();
   
   const completed = all(
     `SELECT * FROM reservations 
