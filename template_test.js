@@ -49,7 +49,8 @@ async function login(username, password) {
   return res.data.token;
 }
 
-function getNextWeekday(dayOfWeek, weeksAhead = 4) {
+function getNextWeekday(dayOfWeek, weeksAhead) {
+  weeksAhead = weeksAhead || (8 + Math.floor(Math.random() * 20));
   const now = new Date();
   const currentDay = now.getDay();
   let daysToAdd = dayOfWeek - currentDay + weeksAhead * 7;
@@ -60,7 +61,8 @@ function getNextWeekday(dayOfWeek, weeksAhead = 4) {
   return now.toISOString().split('T')[0];
 }
 
-function getNextDay(daysAhead = 28) {
+function getNextDay(daysAhead) {
+  daysAhead = daysAhead || (60 + Math.floor(Math.random() * 60));
   const now = new Date();
   now.setDate(now.getDate() + daysAhead);
   return now.toISOString().split('T')[0];
@@ -284,12 +286,14 @@ async function main() {
     console.log(`  正确拒绝，返回: ${res.status}`);
   })();
 
+  let successDate = null;
+
   await test('从模板创建预约 - 成功场景', async () => {
-    const date = getNextWeekday(1);
-    console.log(`  预约日期: ${date} (周一)`);
+    successDate = getNextWeekday(1);
+    console.log(`  预约日期: ${successDate} (周一)`);
 
     const res = await request('POST', `/api/templates/${templateId}/create-reservation`, user1Token, {
-      date: date
+      date: successDate
     });
 
     if (res.status !== 201) {
@@ -308,11 +312,10 @@ async function main() {
   })();
 
   await test('从模板创建预约 - 冲突场景（同一时段再约一次）', async () => {
-    const date = getNextWeekday(1);
-    console.log(`  预约日期: ${date} (周一) - 与上一个预约冲突`);
+    console.log(`  预约日期: ${successDate} (周一) - 与上一个预约冲突`);
 
     const res = await request('POST', `/api/templates/${templateId}/create-reservation`, user1Token, {
-      date: date
+      date: successDate
     });
 
     if (res.status !== 409) {
