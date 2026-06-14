@@ -1,17 +1,65 @@
 const { all } = require('../db');
-const { EXPIRE_AFTER_START_MINUTES, CHECKIN_GRACE_MINUTES } = require('../config');
+const { EXPIRE_AFTER_START_MINUTES, CHECKIN_GRACE_MINUTES, MAX_RECURRING_OCCURRENCES } = require('../config');
+const crypto = require('crypto');
+
+const RECURRING_PATTERNS = {
+  DAILY: 'daily',
+  WEEKLY: 'weekly',
+  BIWEEKLY: 'biweekly',
+  MONTHLY: 'monthly'
+};
+
+const VALID_RECURRING_PATTERNS = Object.values(RECURRING_PATTERNS);
+
+function generateSeriesId() {
+  return 'sr_' + crypto.randomBytes(12).toString('hex');
+}
+
+function generateRecurringDates(startDatetime, endDatetime, pattern, occurrences) {
+  const dates = [];
+  const start = new Date(startDatetime);
+  const end = new Date(endDatetime);
+  const durationMs = end.getTime() - start.getTime();
+
+  for (let i = 0; i < occurrences; i++) {
+    const currentStart = new Date(start);
+
+    switch (pattern) {
+      case RECURRING_PATTERNS.DAILY:
+        currentStart.setDate(currentStart.getDate() + i);
+        break;
+      case RECURRING_PATTERNS.WEEKLY:
+        currentStart.setDate(currentStart.getDate() + i * 7);
+        break;
+      case RECURRING_PATTERNS.BIWEEKLY:
+        currentStart.setDate(currentStart.getDate() + i * 14);
+        break;
+      case RECURRING_PATTERNS.MONTHLY:
+        currentStart.setMonth(currentStart.getMonth() + i);
+        break;
+    }
+
+    const currentEnd = new Date(currentStart.getTime() + durationMs);
+    dates.push({
+      start_datetime: currentStart.toISOString(),
+      end_datetime: currentEnd.toISOString()
+    });
+  }
+
+  return dates;
+}
 
 function hasTimeConflict(roomId, startDatetime, endDatetime, excludeId = null) {
   const sql = excludeId
     ? `SELECT id FROM reservations 
        WHERE room_id = ? 
-         AND status = 'approved'
+         AND status IN ('approved', 'pending')
          AND id != ?
          AND start_datetime < ? 
          AND end_datetime > ?`
     : `SELECT id FROM reservations 
        WHERE room_id = ? 
-         AND status = 'approved'
+         AND status IN ('approved', 'pending')
          AND start_datetime < ? 
          AND end_datetime > ?`;
 
@@ -237,5 +285,10 @@ module.exports = {
   canTransition,
   buildTodoQuery,
   buildUserTodo,
-  buildAdminTodo
+  buildAdminTodo,
+  RECURRING_PATTERNS,
+  VALID_RECURRING_PATTERNS,
+  generateSeriesId,
+  generateRecurringDates,
+  MAX_RECURRING_OCCURRENCES
 };

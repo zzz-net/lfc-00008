@@ -1,0 +1,5 @@
+daily_series_id=sr_035eb303d89dadc892ba64df
+room_id=21
+before_count=14
+before_series_count=5
+before_audit_count=7

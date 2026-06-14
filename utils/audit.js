@@ -13,6 +13,7 @@ function logAudit(userId, action, options = {}) {
 const ACTIONS = {
   LOGIN: 'login',
   CREATE_RESERVATION: 'create_reservation',
+  CREATE_RECURRING_SERIES: 'create_recurring_series',
   APPROVE_RESERVATION: 'approve_reservation',
   REJECT_RESERVATION: 'reject_reservation',
   CANCEL_RESERVATION: 'cancel_reservation',

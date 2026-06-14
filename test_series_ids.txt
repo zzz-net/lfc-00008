@@ -1,0 +1,4 @@
+room_id=21
+daily_series_id=sr_035eb303d89dadc892ba64df
+weekly_series_id=sr_79436918ff635996001a4a56
+monthly_series_id=sr_96f164ea4772049972a0cb00

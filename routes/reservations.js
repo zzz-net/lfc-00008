@@ -3,7 +3,17 @@ const { authenticateToken } = require('../middleware/auth');
 const { run, get, all, transaction } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 const { isBlacklisted } = require('../utils/blacklist');
-const { hasTimeConflict, calculateExpireAt, RESERVATION_STATUSES, buildTodoQuery } = require('../utils/reservation');
+const { 
+  hasTimeConflict, 
+  calculateExpireAt, 
+  RESERVATION_STATUSES, 
+  buildTodoQuery,
+  RECURRING_PATTERNS,
+  VALID_RECURRING_PATTERNS,
+  generateSeriesId,
+  generateRecurringDates,
+  MAX_RECURRING_OCCURRENCES
+} = require('../utils/reservation');
 
 const router = express.Router();
 
@@ -61,6 +71,42 @@ router.get('/', authenticateToken, (req, res) => {
   res.json(reservations);
 });
 
+router.get('/series/:series_id', authenticateToken, (req, res) => {
+  const { series_id } = req.params;
+
+  const reservations = all(
+    `SELECT r.*, 
+            rm.name as room_name, 
+            u.username as user_name,
+            au.username as approver_name
+     FROM reservations r
+     JOIN rooms rm ON r.room_id = rm.id
+     JOIN users u ON r.user_id = u.id
+     LEFT JOIN users au ON r.approved_by = au.id
+     WHERE r.series_id = ?
+     ORDER BY r.start_datetime ASC`,
+    [series_id]
+  );
+
+  if (reservations.length === 0) {
+    return res.status(404).json({ error: '预约系列不存在' });
+  }
+
+  const isOwner = reservations[0].user_id === req.user.id;
+  const isAdmin = req.user.role === 'admin';
+
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: '无权查看此预约系列' });
+  }
+
+  res.json({
+    series_id,
+    pattern: reservations[0].series_id ? 'recurring' : 'single',
+    count: reservations.length,
+    items: reservations
+  });
+});
+
 router.get('/:id', authenticateToken, (req, res) => {
   const reservation = get(
     `SELECT r.*, 
@@ -87,7 +133,7 @@ router.get('/:id', authenticateToken, (req, res) => {
 });
 
 router.post('/', authenticateToken, (req, res) => {
-  const { room_id, start_datetime, end_datetime, purpose, attendees } = req.body;
+  const { room_id, start_datetime, end_datetime, purpose, attendees, recurring } = req.body;
 
   if (!room_id || !start_datetime || !end_datetime) {
     return res.status(400).json({ error: '房间ID、开始时间和结束时间不能为空' });
@@ -120,6 +166,127 @@ router.post('/', authenticateToken, (req, res) => {
       reason: blacklistRecord.reason,
       end_date: blacklistRecord.end_date
     });
+  }
+
+  if (recurring) {
+    const { pattern, occurrences } = recurring;
+
+    if (!VALID_RECURRING_PATTERNS.includes(pattern)) {
+      return res.status(400).json({ 
+        error: '无效的重复模式',
+        valid_patterns: VALID_RECURRING_PATTERNS
+      });
+    }
+
+    if (!Number.isInteger(occurrences) || occurrences < 2) {
+      return res.status(400).json({ error: '重复次数必须是大于等于 2 的整数' });
+    }
+
+    if (occurrences > MAX_RECURRING_OCCURRENCES) {
+      return res.status(400).json({ 
+        error: `重复次数超过上限，最大允许 ${MAX_RECURRING_OCCURRENCES} 次`
+      });
+    }
+
+    const dateList = generateRecurringDates(start_datetime, end_datetime, pattern, occurrences);
+
+    for (let i = 0; i < dateList.length; i++) {
+      const d = dateList[i];
+      const dStart = new Date(d.start_datetime);
+
+      if (dStart <= new Date()) {
+        return res.status(400).json({ 
+          error: `第 ${i + 1} 次预约的开始时间必须晚于当前时间`,
+          occurrence: i + 1,
+          start_datetime: d.start_datetime
+        });
+      }
+
+      if (hasTimeConflict(room_id, d.start_datetime, d.end_datetime)) {
+        return res.status(409).json({ 
+          error: `第 ${i + 1} 次预约时段冲突`,
+          occurrence: i + 1,
+          start_datetime: d.start_datetime,
+          end_datetime: d.end_datetime
+        });
+      }
+    }
+
+    const seriesId = generateSeriesId();
+
+    const tx = transaction(() => {
+      const createdIds = [];
+
+      for (let i = 0; i < dateList.length; i++) {
+        const d = dateList[i];
+        const expireAt = calculateExpireAt(d.start_datetime);
+
+        if (hasTimeConflict(room_id, d.start_datetime, d.end_datetime)) {
+          throw new Error(`CONFLICT:第 ${i + 1} 次预约时段冲突`);
+        }
+
+        const result = run(
+          `INSERT INTO reservations 
+           (room_id, user_id, start_datetime, end_datetime, purpose, attendees, series_id, status, expire_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [room_id, req.user.id, d.start_datetime, d.end_datetime, purpose || null, attendees || null, seriesId, RESERVATION_STATUSES.PENDING, expireAt]
+        );
+
+        const reservationId = result.lastInsertRowid;
+        createdIds.push(reservationId);
+
+        logAudit(req.user.id, ACTIONS.CREATE_RESERVATION, {
+          reservationId,
+          newStatus: RESERVATION_STATUSES.PENDING,
+          details: { 
+            roomId: room_id, 
+            start_datetime: d.start_datetime, 
+            end_datetime: d.end_datetime,
+            series_id: seriesId,
+            occurrence: i + 1,
+            total_occurrences: dateList.length,
+            pattern
+          }
+        });
+      }
+
+      logAudit(req.user.id, ACTIONS.CREATE_RECURRING_SERIES, {
+        reservationId: createdIds[0],
+        details: {
+          series_id: seriesId,
+          pattern,
+          occurrences: dateList.length,
+          room_id,
+          first_start: dateList[0].start_datetime,
+          last_end: dateList[dateList.length - 1].end_datetime,
+          reservation_ids: createdIds
+        }
+      });
+
+      return { seriesId, createdIds };
+    });
+
+    try {
+      const { seriesId, createdIds } = tx();
+      const reservations = all(
+        `SELECT * FROM reservations WHERE series_id = ? ORDER BY start_datetime ASC`,
+        [seriesId]
+      );
+      res.status(201).json({
+        series_id: seriesId,
+        pattern,
+        occurrences: reservations.length,
+        items: reservations
+      });
+    } catch (err) {
+      console.error('Create recurring reservation error:', err);
+      if (err.message && err.message.startsWith('CONFLICT:')) {
+        return res.status(409).json({ error: err.message.replace('CONFLICT:', '') });
+      }
+      res.status(500).json({ error: '创建周期性预约失败' });
+    }
+
+    return;
   }
 
   if (hasTimeConflict(room_id, start_datetime, end_datetime)) {

@@ -8,7 +8,31 @@ const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function migrateColumns() {
+  const pragma = db.prepare("PRAGMA table_info(reservations)").all();
+  const hasSeriesId = pragma.some(col => col.name === 'series_id');
+  if (!hasSeriesId) {
+    db.exec(`ALTER TABLE reservations ADD COLUMN series_id TEXT`);
+    console.log('Added series_id column to reservations table');
+  }
+
+  const idxExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_reservations_series'"
+  ).get();
+  if (!idxExists) {
+    db.exec(`CREATE INDEX idx_reservations_series ON reservations(series_id)`);
+    console.log('Added idx_reservations_series index');
+  }
+}
+
 function initDatabase() {
+  try {
+    migrateColumns();
+  } catch (err) {
+    console.error('Column migration failed:', err);
+    throw err;
+  }
+
   const migrate = db.transaction(() => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -72,6 +96,7 @@ function initDatabase() {
         end_datetime DATETIME NOT NULL,
         purpose TEXT,
         attendees INTEGER,
+        series_id TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         approved_by INTEGER,
         approved_at DATETIME,
@@ -104,6 +129,7 @@ function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_reservations_room_time ON reservations(room_id, start_datetime, end_datetime);
       CREATE INDEX IF NOT EXISTS idx_reservations_user ON reservations(user_id);
       CREATE INDEX IF NOT EXISTS idx_reservations_status ON reservations(status);
+      CREATE INDEX IF NOT EXISTS idx_reservations_series ON reservations(series_id);
       CREATE INDEX IF NOT EXISTS idx_audit_reservation ON audit_logs(reservation_id);
       CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
     `);
