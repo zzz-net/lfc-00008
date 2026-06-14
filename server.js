@@ -12,6 +12,7 @@ const blacklistRoutes = require('./routes/blacklist');
 const approvalRuleRoutes = require('./routes/approvalRules');
 const auditLogRoutes = require('./routes/auditLogs');
 const statsRoutes = require('./routes/stats');
+const calendarRoutes = require('./routes/calendar');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/blacklist', blacklistRoutes);
 app.use('/api/approval-rules', approvalRuleRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/calendar', calendarRoutes);
 
 app.use((err, req, res, next) => {
   console.error('Error:', err);

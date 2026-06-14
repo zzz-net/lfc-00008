@@ -23,6 +23,26 @@ function migrateColumns() {
     db.exec(`CREATE INDEX idx_reservations_series ON reservations(series_id)`);
     console.log('Added idx_reservations_series index');
   }
+
+  const subTableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_subscriptions'"
+  ).get();
+  if (!subTableExists) {
+    db.exec(`
+      CREATE TABLE calendar_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        revoked_at DATETIME,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE UNIQUE INDEX idx_cal_sub_token ON calendar_subscriptions(token);
+      CREATE INDEX idx_cal_sub_user ON calendar_subscriptions(user_id);
+    `);
+    console.log('Created calendar_subscriptions table');
+  }
 }
 
 function initDatabase() {

@@ -26,7 +26,13 @@ const ACTIONS = {
   DELETE_ROOM: 'delete_room',
   ADD_BLACKLIST: 'add_blacklist',
   REMOVE_BLACKLIST: 'remove_blacklist',
-  UPDATE_APPROVAL_RULE: 'update_approval_rule'
+  UPDATE_APPROVAL_RULE: 'update_approval_rule',
+  CALENDAR_EXPORT_ICS: 'calendar_export_ics',
+  CALENDAR_SUBSCRIBE: 'calendar_subscribe',
+  CALENDAR_SUBSCRIBE_ACCESS: 'calendar_subscribe_access',
+  CALENDAR_SUBSCRIBE_REGENERATE: 'calendar_subscribe_regenerate',
+  CALENDAR_SUBSCRIBE_REVOKE: 'calendar_subscribe_revoke',
+  CALENDAR_ROOM_EXPORT_ICS: 'calendar_room_export_ics'
 };
 
 module.exports = {
