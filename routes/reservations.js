@@ -3,9 +3,20 @@ const { authenticateToken } = require('../middleware/auth');
 const { run, get, all, transaction } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 const { isBlacklisted } = require('../utils/blacklist');
-const { hasTimeConflict, calculateExpireAt, RESERVATION_STATUSES } = require('../utils/reservation');
+const { hasTimeConflict, calculateExpireAt, RESERVATION_STATUSES, buildTodoQuery } = require('../utils/reservation');
 
 const router = express.Router();
+
+router.get('/todo', authenticateToken, (req, res) => {
+  const { room_id, status } = req.query;
+
+  if (req.user.role !== 'admin' && (room_id || status)) {
+    return res.status(403).json({ error: '普通用户不支持 room_id 或 status 过滤' });
+  }
+
+  const todos = buildTodoQuery(req.user, { room_id, status });
+  res.json({ items: todos });
+});
 
 router.get('/', authenticateToken, (req, res) => {
   const { status, room_id, start_date, end_date } = req.query;

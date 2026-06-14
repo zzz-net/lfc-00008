@@ -88,6 +88,20 @@ curl -X POST http://localhost:3000/api/reservations/1/checkin \
 # 取消预约
 curl -X POST http://localhost:3000/api/reservations/1/cancel \
   -H "Authorization: Bearer <user_token>"
+
+# 待我处理列表（普通用户）
+# 返回可取消、可签到的预约
+curl -H "Authorization: Bearer <user_token>" http://localhost:3000/api/reservations/todo
+
+# 待我处理列表（管理员）
+# 返回待审批、可拒绝、超时未处理的预约
+curl -H "Authorization: Bearer <admin_token>" http://localhost:3000/api/reservations/todo
+
+# 管理员按房间过滤
+curl -H "Authorization: Bearer <admin_token>" "http://localhost:3000/api/reservations/todo?room_id=1"
+
+# 管理员按状态过滤（pending / approved）
+curl -H "Authorization: Bearer <admin_token>" "http://localhost:3000/api/reservations/todo?status=pending"
 ```
 
 ### 黑名单管理

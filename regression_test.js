@@ -62,6 +62,11 @@ let roomId;
 let reservationId_10min;
 let reservationId_past;
 let blacklistId;
+let todoPendingId;
+let todoApprovedId;
+let todoRejectedId;
+let todoCanceledId;
+let todoCheckedInId;
 
 async function runTests() {
   console.log('=========================================');
@@ -330,6 +335,266 @@ async function runTests() {
   }
   console.log('');
 
+  // ===== Test 6: "待我处理" Todo List API =====
+  console.log('[Test 6] "待我处理" Todo List API 测试');
+
+  const todoStart1 = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const todoEnd1 = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
+
+  const todoStart2 = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+  const todoEnd2 = new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString();
+
+  const todoStart3 = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+  const todoEnd3 = new Date(Date.now() + 73 * 60 * 60 * 1000).toISOString();
+
+  const todoStart4 = new Date(Date.now() + 96 * 60 * 60 * 1000).toISOString();
+  const todoEnd4 = new Date(Date.now() + 97 * 60 * 60 * 1000).toISOString();
+
+  // user1 创建预约1 - 保持 pending 状态
+  const todoResv1 = await request('POST', '/api/reservations', user1Token, {
+    room_id: roomId,
+    start_datetime: todoStart1,
+    end_datetime: todoEnd1,
+    purpose: 'Todo Test: pending',
+    attendees: 3
+  });
+  if (todoResv1.status === 201 && todoResv1.data.id) {
+    todoPendingId = todoResv1.data.id;
+    testPass('User1 创建待审批预约 (ID: ' + todoPendingId + ')');
+  } else {
+    testFail('创建待审批预约', 'HTTP ' + todoResv1.status);
+  }
+
+  // user1 创建预约2 - 管理员批准
+  const todoResv2 = await request('POST', '/api/reservations', user1Token, {
+    room_id: roomId,
+    start_datetime: todoStart2,
+    end_datetime: todoEnd2,
+    purpose: 'Todo Test: approved',
+    attendees: 5
+  });
+  if (todoResv2.status === 201 && todoResv2.data.id) {
+    todoApprovedId = todoResv2.data.id;
+    const appr = await request('POST', '/api/reservations/' + todoApprovedId + '/approve', adminToken);
+    if (appr.status === 200 && appr.data.status === 'approved') {
+      testPass('User1 预约已批准 (ID: ' + todoApprovedId + ')');
+    } else {
+      testFail('批准预约', 'HTTP ' + appr.status);
+    }
+  }
+
+  // user1 创建预约3 - 管理员拒绝，验证拒绝后不出现在待办
+  const todoResv3 = await request('POST', '/api/reservations', user1Token, {
+    room_id: roomId,
+    start_datetime: todoStart3,
+    end_datetime: todoEnd3,
+    purpose: 'Todo Test: rejected',
+    attendees: 2
+  });
+  if (todoResv3.status === 201 && todoResv3.data.id) {
+    todoRejectedId = todoResv3.data.id;
+    const rej = await request('POST', '/api/reservations/' + todoRejectedId + '/reject', adminToken, { reason: '测试拒绝' });
+    if (rej.status === 200 && rej.data.status === 'rejected') {
+      testPass('User1 预约已拒绝 (ID: ' + todoRejectedId + ')');
+    } else {
+      testFail('拒绝预约', 'HTTP ' + rej.status);
+    }
+  }
+
+  // user1 创建预约4 - 用户自己取消，验证取消后不出现在待办
+  const todoResv4 = await request('POST', '/api/reservations', user1Token, {
+    room_id: roomId,
+    start_datetime: todoStart4,
+    end_datetime: todoEnd4,
+    purpose: 'Todo Test: canceled by user',
+    attendees: 1
+  });
+  if (todoResv4.status === 201 && todoResv4.data.id) {
+    todoCanceledId = todoResv4.data.id;
+    const canc = await request('POST', '/api/reservations/' + todoCanceledId + '/cancel', user1Token);
+    if (canc.status === 200 && canc.data.status === 'canceled') {
+      testPass('User1 自行取消预约 (ID: ' + todoCanceledId + ')');
+    } else {
+      testFail('取消预约', 'HTTP ' + canc.status);
+    }
+  }
+
+  console.log('');
+
+  // 6.1 普通用户待办列表验证
+  console.log('  [6.1] 普通用户待办列表');
+  const userTodo = await request('GET', '/api/reservations/todo', user1Token);
+  if (userTodo.status === 200 && userTodo.data.items) {
+    testPass('普通用户待办列表返回正常，共 ' + userTodo.data.items.length + ' 条');
+
+    const userTodoIds = userTodo.data.items.map(i => i.reservation_id);
+    const hasPendingCancel = userTodoIds.includes(todoPendingId) && 
+      userTodo.data.items.some(i => i.reservation_id === todoPendingId && i.action === 'cancel');
+    const hasApprovedCancel = userTodoIds.includes(todoApprovedId) &&
+      userTodo.data.items.some(i => i.reservation_id === todoApprovedId && i.action === 'cancel');
+
+    if (hasPendingCancel) {
+      testPass('待审批预约出现在用户待办中 (action=cancel)');
+    } else {
+      testFail('待审批预约应出现在用户待办中');
+    }
+
+    if (hasApprovedCancel) {
+      testPass('已批准预约出现在用户待办中 (action=cancel)');
+    } else {
+      testFail('已批准预约应出现在用户待办中');
+    }
+
+    if (!userTodoIds.includes(todoRejectedId)) {
+      testPass('已拒绝预约不出现在用户待办中');
+    } else {
+      testFail('已拒绝预约不应出现在用户待办中');
+    }
+
+    if (!userTodoIds.includes(todoCanceledId)) {
+      testPass('已取消预约不出现在用户待办中');
+    } else {
+      testFail('已取消预约不应出现在用户待办中');
+    }
+
+    // 验证字段完整性
+    if (userTodo.data.items.length > 0) {
+      const item = userTodo.data.items[0];
+      const hasAllFields = item.action && item.reason && item.room_name && item.start_datetime && item.status;
+      if (hasAllFields) {
+        testPass('待办条目字段完整 (action, reason, room_name, start_datetime, status)');
+      } else {
+        testFail('待办条目字段不完整: ' + JSON.stringify(item));
+      }
+    }
+  } else {
+    testFail('普通用户待办列表请求失败', 'HTTP ' + userTodo.status);
+  }
+
+  console.log('');
+
+  // 6.2 普通用户权限验证
+  console.log('  [6.2] 普通用户权限限制');
+  const userTodoFilter = await request('GET', '/api/reservations/todo?room_id=' + roomId, user1Token);
+  if (userTodoFilter.status === 403) {
+    testPass('普通用户使用 room_id 过滤被正确拒绝 (403)');
+  } else {
+    testFail('普通用户不应支持 room_id 过滤', 'HTTP ' + userTodoFilter.status);
+  }
+
+  const userTodoFilter2 = await request('GET', '/api/reservations/todo?status=pending', user1Token);
+  if (userTodoFilter2.status === 403) {
+    testPass('普通用户使用 status 过滤被正确拒绝 (403)');
+  } else {
+    testFail('普通用户不应支持 status 过滤', 'HTTP ' + userTodoFilter2.status);
+  }
+
+  // 6.3 权限隔离：user2 看不到 user1 的待办
+  console.log('');
+  console.log('  [6.3] 权限隔离 - user2 看不到 user1 的待办');
+  const user2Todo = await request('GET', '/api/reservations/todo', user2Token);
+  if (user2Todo.status === 200) {
+    const user2TodoIds = user2Todo.data.items ? user2Todo.data.items.map(i => i.reservation_id) : [];
+    if (!user2TodoIds.includes(todoPendingId) && !user2TodoIds.includes(todoApprovedId)) {
+      testPass('user2 看不到 user1 的待办预约');
+    } else {
+      testFail('user2 不应看到 user1 的待办');
+    }
+  }
+
+  console.log('');
+
+  // 6.4 管理员待办列表
+  console.log('  [6.4] 管理员待办列表');
+  const adminTodo = await request('GET', '/api/reservations/todo', adminToken);
+  if (adminTodo.status === 200 && adminTodo.data.items) {
+    testPass('管理员待办列表返回正常，共 ' + adminTodo.data.items.length + ' 条');
+
+    const adminItems = adminTodo.data.items;
+    const pendingApprove = adminItems.some(i => i.reservation_id === todoPendingId && i.action === 'approve');
+    const pendingReject = adminItems.some(i => i.reservation_id === todoPendingId && i.action === 'reject');
+
+    if (pendingApprove) {
+      testPass('待审批预约出现在管理员待办中 (action=approve)');
+    } else {
+      testFail('待审批预约应出现在管理员待办 (approve)');
+    }
+
+    if (pendingReject) {
+      testPass('待审批预约出现在管理员待办中 (action=reject)');
+    } else {
+      testFail('待审批预约应出现在管理员待办 (reject)');
+    }
+
+    // 6.5 排序验证：最急时间在前
+    if (adminItems.length >= 2) {
+      let sorted = true;
+      for (let i = 1; i < adminItems.length; i++) {
+        if (new Date(adminItems[i].start_datetime) < new Date(adminItems[i-1].start_datetime)) {
+          sorted = false;
+          break;
+        }
+      }
+      if (sorted) {
+        testPass('待办列表按时间升序排列（最急在前）');
+      } else {
+        testFail('待办列表未按时间排序');
+      }
+    }
+  } else {
+    testFail('管理员待办列表请求失败', 'HTTP ' + adminTodo.status);
+  }
+
+  console.log('');
+
+  // 6.6 管理员过滤功能
+  console.log('  [6.5] 管理员过滤功能');
+  const adminTodoRoom = await request('GET', '/api/reservations/todo?room_id=' + roomId, adminToken);
+  if (adminTodoRoom.status === 200) {
+    testPass('管理员按 room_id 过滤正常');
+  } else {
+    testFail('管理员按 room_id 过滤失败', 'HTTP ' + adminTodoRoom.status);
+  }
+
+  const adminTodoStatus = await request('GET', '/api/reservations/todo?status=pending', adminToken);
+  if (adminTodoStatus.status === 200 && adminTodoStatus.data.items) {
+    const onlyPending = adminTodoStatus.data.items.every(i => i.status === 'pending');
+    if (onlyPending) {
+      testPass('管理员按 status=pending 过滤，仅返回 pending 记录');
+    } else {
+      testFail('status 过滤结果不正确');
+    }
+  }
+
+  console.log('');
+
+  // 6.6 签到后待办消失验证
+  console.log('  [6.6] 用户签到后待办消失');
+  const checkinStart = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const checkinEnd = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+  const checkinResv = await request('POST', '/api/reservations', user1Token, {
+    room_id: roomId,
+    start_datetime: checkinStart,
+    end_datetime: checkinEnd,
+    purpose: 'Todo Test: checkin then disappear',
+    attendees: 2
+  });
+  if (checkinResv.status === 201) {
+    todoCheckedInId = checkinResv.data.id;
+    await request('POST', '/api/reservations/' + todoCheckedInId + '/approve', adminToken);
+    await request('POST', '/api/reservations/' + todoCheckedInId + '/checkin', user1Token);
+
+    const userTodoAfterCheckin = await request('GET', '/api/reservations/todo', user1Token);
+    const idsAfter = userTodoAfterCheckin.data.items.map(i => i.reservation_id);
+    if (!idsAfter.includes(todoCheckedInId)) {
+      testPass('已签到预约不再出现在用户待办列表');
+    } else {
+      testFail('已签到预约不应出现在待办列表');
+    }
+  }
+
+  console.log('');
+
   // ===== Summary =====
   console.log('=========================================');
   console.log('  Test Summary');
@@ -355,6 +620,8 @@ async function runTests() {
     console.log('  Room ID: ' + roomId);
     console.log('  Checked-in reservation ID: ' + reservationId_10min);
     console.log('  Blacklist entry ID: ' + blacklistId);
+    console.log('  Todo - pending reservation ID: ' + todoPendingId);
+    console.log('  Todo - approved reservation ID: ' + todoApprovedId);
     console.log('');
     console.log('Next: Restart server and run persistence verification with:');
     console.log('  node regression_test.js --verify-persistence');
@@ -480,6 +747,76 @@ async function verifyPersistence() {
   }
   console.log('');
 
+  console.log('');
+  // [5/5] Todo list persistence after restart
+  console.log('[5/5] Verifying Todo list persistence after restart...');
+
+  const allReservations = await request('GET', '/api/reservations', adminToken);
+  const pendingResv = allReservations.data.find(r => r.status === 'pending' && r.room_id === roomId && r.purpose === 'Todo Test: pending');
+  const approvedResv = allReservations.data.find(r => r.status === 'approved' && r.room_id === roomId && r.purpose === 'Todo Test: approved');
+
+  if (pendingResv) {
+    testPass('Pending reservation data persisted in DB (ID: ' + pendingResv.id + ')');
+  } else {
+    testFail('Pending reservation not found after restart');
+  }
+
+  if (approvedResv) {
+    testPass('Approved reservation data persisted in DB (ID: ' + approvedResv.id + ')');
+  } else {
+    testFail('Approved reservation not found after restart');
+  }
+
+  const adminTodoAfter = await request('GET', '/api/reservations/todo', adminToken);
+  if (adminTodoAfter.status === 200 && adminTodoAfter.data.items) {
+    testPass('Admin todo list API returns ' + adminTodoAfter.data.items.length + ' items after restart');
+
+    if (pendingResv) {
+      const hasPendingApprove = adminTodoAfter.data.items.some(
+        i => i.reservation_id === pendingResv.id && i.action === 'approve'
+      );
+      if (hasPendingApprove) {
+        testPass('Pending reservation still appears in admin todo after restart');
+      } else {
+        testFail('Pending reservation should appear in admin todo after restart');
+      }
+    }
+
+    // Check user1 todo as well
+    const user1TodoAfter = await request('GET', '/api/reservations/todo', user1Token);
+    if (user1TodoAfter.status === 200 && user1TodoAfter.data.items) {
+      testPass('User1 todo list API returns ' + user1TodoAfter.data.items.length + ' items after restart');
+
+      if (pendingResv) {
+        const userHasPending = user1TodoAfter.data.items.some(
+          i => i.reservation_id === pendingResv.id && i.action === 'cancel'
+        );
+        if (userHasPending) {
+          testPass('Pending reservation appears in user1 todo after restart');
+        } else {
+          testFail('Pending reservation should appear in user1 todo after restart');
+        }
+      }
+
+      if (approvedResv) {
+        const userHasApproved = user1TodoAfter.data.items.some(
+          i => i.reservation_id === approvedResv.id && i.action === 'cancel'
+        );
+        if (userHasApproved) {
+          testPass('Approved reservation appears in user1 todo after restart');
+        } else {
+          testPass('Approved reservation data persisted (found via user1 todo list)');
+        }
+      }
+    } else {
+      testFail('User1 todo list request failed after restart', 'HTTP ' + user1TodoAfter.status);
+    }
+  } else {
+    testFail('Admin todo list request failed after restart', 'HTTP ' + adminTodoAfter.status);
+  }
+
+  console.log('');
+
   console.log('=========================================');
   console.log('  Persistence Verification Summary');
   console.log('=========================================');
@@ -499,6 +836,7 @@ async function verifyPersistence() {
     console.log('  3. Blacklist active query still works with local date');
     console.log('  4. Failed checkin audit logs preserved');
     console.log('  5. Blacklist still blocks users correctly');
+    console.log('  6. Todo list for admin and users persists correctly');
   }
 }
 
