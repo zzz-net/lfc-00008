@@ -66,8 +66,6 @@ function buildTodoQuery(user, filters = {}) {
 
 function buildUserTodo(userId, now) {
   const nowIso = now.toISOString();
-  
-  const graceStartIso = new Date(now.getTime() - CHECKIN_GRACE_MINUTES * 60 * 1000).toISOString();
 
   const sql = `
     SELECT 
@@ -122,7 +120,8 @@ function buildUserTodo(userId, now) {
         });
       }
 
-      if (nowIso >= graceStartIso && nowIso <= r.expire_at) {
+      const graceStart = new Date(start.getTime() - CHECKIN_GRACE_MINUTES * 60 * 1000);
+      if (now >= graceStart && nowIso <= r.expire_at) {
         todos.push({
           reservation_id: r.id,
           action: 'checkin',
