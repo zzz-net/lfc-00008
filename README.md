@@ -12,6 +12,7 @@
 - ⚫ **黑名单管理**：管理员可将用户加入黑名单
 - 📋 **审计日志**：完整的状态流转审计
 - ⏳ **自动超时失效**：预约开始后超时未签到自动失效
+- 📝 **预约模板**：保存常用预约配置为模板，一键创建预约，支持导入导出
 - 💾 **SQLite持久化**：服务重启数据不丢失
 
 ## 快速开始
@@ -118,6 +119,76 @@ curl -X DELETE http://localhost:3000/api/blacklist/1 \
   -H "Authorization: Bearer <admin_token>"
 ```
 
+### 预约模板
+
+用户可将常用预约配置保存为模板，以后只需选日期即可快速创建预约。模板按用户隔离，管理员可查看所有用户的模板。
+
+```bash
+# 创建模板
+# day_of_week: 0=周日, 1=周一, ..., 6=周六，不传或null表示不限星期
+# tags: 标签数组，用于分类筛选
+# config: 自定义配置对象（如设备需求等）
+curl -X POST http://localhost:3000/api/templates \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "周例会模板",
+    "tags": ["会议", "每周", "团队"],
+    "room_id": 1,
+    "start_time": "09:00",
+    "end_time": "10:00",
+    "day_of_week": 1,
+    "purpose": "团队周例会",
+    "attendees": 8,
+    "config": {"needsProjector": true}
+  }'
+
+# 查询模板列表（普通用户只看自己的，管理员看全部）
+curl -H "Authorization: Bearer <token>" http://localhost:3000/api/templates
+
+# 按标签筛选
+curl -H "Authorization: Bearer <token>" "http://localhost:3000/api/templates?tag=会议"
+
+# 按房间筛选
+curl -H "Authorization: Bearer <token>" "http://localhost:3000/api/templates?room_id=1"
+
+# 获取单个模板详情
+curl -H "Authorization: Bearer <token>" http://localhost:3000/api/templates/1
+
+# 更新模板（不传 day_of_week 时保留原值，传 null 清除星期限制）
+curl -X PUT http://localhost:3000/api/templates/1 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"purpose": "团队周例会 - 更新", "attendees": 10, "tags": ["会议", "每周", "核心团队"]}'
+
+# 删除模板
+curl -X DELETE http://localhost:3000/api/templates/1 \
+  -H "Authorization: Bearer <token>"
+
+# 从模板创建预约（只需提供日期，时间从模板自动填充）
+# 冲突时返回 409 和详细冲突信息；星期不匹配时返回 400
+curl -X POST http://localhost:3000/api/templates/1/create-reservation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2025-01-20"}'
+
+# 从模板创建预约（可覆盖 purpose 和 attendees）
+curl -X POST http://localhost:3000/api/templates/1/create-reservation \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2025-01-20", "purpose": "特别会议", "attendees": 15}'
+
+# 导出模板为 JSON 文件
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:3000/api/templates/1/export -o template.json
+
+# 从 JSON 导入模板（导入的模板归当前用户，room_id 不存在时按 room_name 匹配）
+curl -X POST http://localhost:3000/api/templates/import \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d @template.json
+```
+
 ### 审计日志
 
 ```bash
@@ -147,8 +218,20 @@ pending (待审批)
 3. **签到时间窗口**：预约开始前15分钟至开始后30分钟内可签到
 4. **自动失效**：预约开始30分钟后未签到自动标记为过期
 5. **黑名单限制**：黑名单用户无法提交预约
-6. **数据持久化**：所有数据存储在 SQLite 数据库中，服务重启不丢失
+6. **模板隔离**：普通用户只能查看和操作自己的模板，管理员可查看所有
+7. **模板预约校验**：从模板创建预约时执行完整的冲突检测和星期校验，冲突时返回详细冲突信息
+8. **数据持久化**：所有数据存储在 SQLite 数据库中，服务重启不丢失
 
 ## 验收测试
 
 运行 `bash test.sh` 进行完整的验收测试。
+
+模板功能测试：
+
+```bash
+# 运行模板全流程测试（创建、查询、更新、删除、从模板预约、导入导出、权限隔离）
+node template_test.js
+
+# 重启后验证模板数据持久性
+node template_test.js persistence <模板ID>
+```

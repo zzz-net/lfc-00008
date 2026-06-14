@@ -1,110 +1,21 @@
 const { all } = require('../db');
-const { EXPIRE_AFTER_START_MINUTES, CHECKIN_GRACE_MINUTES, MAX_RECURRING_OCCURRENCES } = require('../config');
-const crypto = require('crypto');
+const { CHECKIN_GRACE_MINUTES } = require('../config');
+const {
+  hasTimeConflict,
+  hasTimeConflictOnCreate,
+  calculateExpireAt,
+  RECURRING_PATTERNS,
+  VALID_RECURRING_PATTERNS,
+  generateSeriesId,
+  generateRecurringDates,
+  MAX_RECURRING_OCCURRENCES
+} = require('./timeUtils');
 
-const RECURRING_PATTERNS = {
-  DAILY: 'daily',
-  WEEKLY: 'weekly',
-  BIWEEKLY: 'biweekly',
-  MONTHLY: 'monthly'
-};
-
-const VALID_RECURRING_PATTERNS = Object.values(RECURRING_PATTERNS);
-
-function generateSeriesId() {
-  return 'sr_' + crypto.randomBytes(12).toString('hex');
-}
-
-function generateRecurringDates(startDatetime, endDatetime, pattern, occurrences) {
-  const dates = [];
-  const start = new Date(startDatetime);
-  const end = new Date(endDatetime);
-  const durationMs = end.getTime() - start.getTime();
-  const originalDay = start.getDate();
-
-  for (let i = 0; i < occurrences; i++) {
-    const currentStart = new Date(start);
-
-    switch (pattern) {
-      case RECURRING_PATTERNS.DAILY:
-        currentStart.setDate(currentStart.getDate() + i);
-        break;
-      case RECURRING_PATTERNS.WEEKLY:
-        currentStart.setDate(currentStart.getDate() + i * 7);
-        break;
-      case RECURRING_PATTERNS.BIWEEKLY:
-        currentStart.setDate(currentStart.getDate() + i * 14);
-        break;
-      case RECURRING_PATTERNS.MONTHLY:
-        currentStart.setDate(1);
-        currentStart.setMonth(start.getMonth() + i);
-        const lastDayOfTargetMonth = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 0).getDate();
-        currentStart.setDate(Math.min(originalDay, lastDayOfTargetMonth));
-        currentStart.setHours(start.getHours(), start.getMinutes(), start.getSeconds(), start.getMilliseconds());
-        break;
-    }
-
-    const currentEnd = new Date(currentStart.getTime() + durationMs);
-    dates.push({
-      start_datetime: currentStart.toISOString(),
-      end_datetime: currentEnd.toISOString()
-    });
-  }
-
-  return dates;
-}
-
-function hasTimeConflict(roomId, startDatetime, endDatetime, excludeId = null) {
-  const sql = excludeId
-    ? `SELECT id FROM reservations 
-       WHERE room_id = ? 
-         AND status IN ('approved', 'pending')
-         AND id != ?
-         AND start_datetime < ? 
-         AND end_datetime > ?`
-    : `SELECT id FROM reservations 
-       WHERE room_id = ? 
-         AND status IN ('approved', 'pending')
-         AND start_datetime < ? 
-         AND end_datetime > ?`;
-
-  const params = excludeId
-    ? [roomId, excludeId, endDatetime, startDatetime]
-    : [roomId, endDatetime, startDatetime];
-
-  const conflicts = all(sql, params);
-  return conflicts.length > 0;
-}
-
-function calculateExpireAt(startDatetime) {
-  const start = new Date(startDatetime);
-  const expire = new Date(start.getTime() + EXPIRE_AFTER_START_MINUTES * 60 * 1000);
-  return expire.toISOString();
-}
-
-const RESERVATION_STATUSES = {
-  PENDING: 'pending',
-  APPROVED: 'approved',
-  REJECTED: 'rejected',
-  CANCELED: 'canceled',
-  CHECKED_IN: 'checked_in',
-  EXPIRED: 'expired',
-  COMPLETED: 'completed'
-};
-
-const VALID_TRANSITIONS = {
-  [RESERVATION_STATUSES.PENDING]: [RESERVATION_STATUSES.APPROVED, RESERVATION_STATUSES.REJECTED, RESERVATION_STATUSES.CANCELED],
-  [RESERVATION_STATUSES.APPROVED]: [RESERVATION_STATUSES.CHECKED_IN, RESERVATION_STATUSES.CANCELED, RESERVATION_STATUSES.EXPIRED, RESERVATION_STATUSES.COMPLETED],
-  [RESERVATION_STATUSES.CHECKED_IN]: [RESERVATION_STATUSES.COMPLETED],
-  [RESERVATION_STATUSES.REJECTED]: [],
-  [RESERVATION_STATUSES.CANCELED]: [],
-  [RESERVATION_STATUSES.EXPIRED]: [],
-  [RESERVATION_STATUSES.COMPLETED]: []
-};
-
-function canTransition(from, to) {
-  return VALID_TRANSITIONS[from] && VALID_TRANSITIONS[from].includes(to);
-}
+const {
+  RESERVATION_STATUSES,
+  VALID_TRANSITIONS,
+  canTransition
+} = require('./approvalUtils');
 
 function buildTodoQuery(user, filters = {}) {
   const { room_id, status } = filters;
@@ -284,6 +195,7 @@ function buildAdminTodo(now, filters = {}) {
 
 module.exports = {
   hasTimeConflict,
+  hasTimeConflictOnCreate,
   calculateExpireAt,
   RESERVATION_STATUSES,
   VALID_TRANSITIONS,

@@ -1,11 +1,25 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { validateBody, validateQuery, AppError, validateDateFormat } = require('../middleware/validate');
 const { run, get, all } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
+const { getLocalDateStr } = require('../utils/blacklist');
 
 const router = express.Router();
 
-router.get('/', authenticateToken, requireAdmin, (req, res) => {
+const listQuerySchema = {
+  active: { type: 'string', enum: ['true', 'false'], label: '是否有效' }
+};
+
+const createSchema = {
+  user_id: { required: true, type: 'integer', label: '用户ID' },
+  reason: { type: 'string', label: '原因' },
+  start_date: { required: true, type: 'string', custom: (v) => validateDateFormat(v) ? null : '日期格式无效，请使用 YYYY-MM-DD 格式', label: '开始日期' },
+  end_date: { type: 'string', custom: (v) => v === undefined || validateDateFormat(v) ? null : '日期格式无效，请使用 YYYY-MM-DD 格式', label: '结束日期' },
+  is_permanent: { type: 'boolean', label: '是否永久' }
+};
+
+router.get('/', authenticateToken, requireAdmin, validateQuery(listQuerySchema), (req, res) => {
   const { active } = req.query;
   let sql = `
     SELECT b.*, u.username as user_name, cu.username as creator_name
@@ -16,7 +30,6 @@ router.get('/', authenticateToken, requireAdmin, (req, res) => {
   let params = [];
 
   if (active === 'true') {
-    const { getLocalDateStr } = require('../utils/blacklist');
     const today = getLocalDateStr();
     sql += ` WHERE (b.is_permanent = 1 OR (b.start_date <= ? AND (b.end_date IS NULL OR b.end_date >= ?)))`;
     params = [today, today];
@@ -27,28 +40,24 @@ router.get('/', authenticateToken, requireAdmin, (req, res) => {
   res.json(records);
 });
 
-router.post('/', authenticateToken, requireAdmin, (req, res) => {
+router.post('/', authenticateToken, requireAdmin, validateBody(createSchema), (req, res) => {
   const { user_id, reason, start_date, end_date, is_permanent = false } = req.body;
 
-  if (!user_id || !start_date) {
-    return res.status(400).json({ error: '用户ID和开始日期不能为空' });
-  }
-
-  const user = get('SELECT id, username FROM users WHERE id = ?', [user_id]);
+  const user = get('SELECT id, username, role FROM users WHERE id = ?', [user_id]);
   if (!user) {
-    return res.status(404).json({ error: '用户不存在' });
+    throw new AppError('用户不存在', 404);
   }
 
   if (user.role === 'admin') {
-    return res.status(400).json({ error: '不能将管理员加入黑名单' });
+    throw new AppError('不能将管理员加入黑名单', 400);
   }
 
   if (!is_permanent && !end_date) {
-    return res.status(400).json({ error: '非永久黑名单必须指定结束日期' });
+    throw new AppError('非永久黑名单必须指定结束日期', 400);
   }
 
   if (end_date && end_date < start_date) {
-    return res.status(400).json({ error: '结束日期不能早于开始日期' });
+    throw new AppError('结束日期不能早于开始日期', 400);
   }
 
   const result = run(
@@ -77,7 +86,7 @@ router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
 
   const record = get('SELECT * FROM blacklist WHERE id = ?', [id]);
   if (!record) {
-    return res.status(404).json({ error: '黑名单记录不存在' });
+    throw new AppError('黑名单记录不存在', 404);
   }
 
   run('DELETE FROM blacklist WHERE id = ?', [id]);

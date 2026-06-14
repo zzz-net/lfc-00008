@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { validateQuery, AppError, validateDateFormat } = require('../middleware/validate');
 const { all } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 const { STATS_MAX_RANGE_DAYS, STATS_EXPORT_FORMATS, STATS_DEFAULT_FORMAT } = require('../config');
@@ -9,6 +10,17 @@ const router = express.Router();
 if (!ACTIONS.EXPORT_STATS) {
   ACTIONS.EXPORT_STATS = 'export_stats';
 }
+
+const baseQuerySchema = {
+  start_date: { type: 'string', custom: (v) => v === undefined || validateDateFormat(v) ? null : '日期格式无效，请使用 YYYY-MM-DD 格式', label: '开始日期' },
+  end_date: { type: 'string', custom: (v) => v === undefined || validateDateFormat(v) ? null : '日期格式无效，请使用 YYYY-MM-DD 格式', label: '结束日期' },
+  format: { type: 'string', label: '导出格式' }
+};
+
+const roomsQuerySchema = {
+  ...baseQuerySchema,
+  group_by: { type: 'string', enum: ['month', 'week', 'day'], label: '分组方式' }
+};
 
 function getIpAddress(req) {
   return req.ip || req.connection.remoteAddress || null;
@@ -75,12 +87,12 @@ function buildUserFilter(user, sqlParts, params) {
   }
 }
 
-router.get('/rooms', authenticateToken, (req, res) => {
+router.get('/rooms', authenticateToken, validateQuery(roomsQuerySchema), (req, res) => {
   const { start_date, end_date, group_by = 'month', format } = req.query;
 
   const formatCheck = validateFormat(format);
   if (!formatCheck.valid) {
-    return res.status(400).json({ error: formatCheck.error });
+    throw new AppError(formatCheck.error, 400);
   }
 
   const start = start_date ? start_date : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -88,11 +100,7 @@ router.get('/rooms', authenticateToken, (req, res) => {
 
   const dateCheck = validateDateRange(start, end);
   if (!dateCheck.valid) {
-    return res.status(400).json({ error: dateCheck.error });
-  }
-
-  if (!['month', 'week', 'day'].includes(group_by)) {
-    return res.status(400).json({ error: 'group_by 必须是 month、week 或 day' });
+    throw new AppError(dateCheck.error, 400);
   }
 
   const sqlParts = [
@@ -168,12 +176,12 @@ router.get('/rooms', authenticateToken, (req, res) => {
   sendResponse(res, formatCheck.format, data, columns, `room_usage_${start}_${end}`);
 });
 
-router.get('/users', authenticateToken, (req, res) => {
+router.get('/users', authenticateToken, validateQuery(baseQuerySchema), (req, res) => {
   const { start_date, end_date, format } = req.query;
 
   const formatCheck = validateFormat(format);
   if (!formatCheck.valid) {
-    return res.status(400).json({ error: formatCheck.error });
+    throw new AppError(formatCheck.error, 400);
   }
 
   const start = start_date ? start_date : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -181,7 +189,7 @@ router.get('/users', authenticateToken, (req, res) => {
 
   const dateCheck = validateDateRange(start, end);
   if (!dateCheck.valid) {
-    return res.status(400).json({ error: dateCheck.error });
+    throw new AppError(dateCheck.error, 400);
   }
 
   const joinConditions = [
@@ -263,12 +271,12 @@ router.get('/users', authenticateToken, (req, res) => {
   sendResponse(res, formatCheck.format, data, columns, `user_behavior_${start}_${end}`);
 });
 
-router.get('/heatmap', authenticateToken, (req, res) => {
+router.get('/heatmap', authenticateToken, validateQuery(baseQuerySchema), (req, res) => {
   const { start_date, end_date, format } = req.query;
 
   const formatCheck = validateFormat(format);
   if (!formatCheck.valid) {
-    return res.status(400).json({ error: formatCheck.error });
+    throw new AppError(formatCheck.error, 400);
   }
 
   const start = start_date ? start_date : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -276,7 +284,7 @@ router.get('/heatmap', authenticateToken, (req, res) => {
 
   const dateCheck = validateDateRange(start, end);
   if (!dateCheck.valid) {
-    return res.status(400).json({ error: dateCheck.error });
+    throw new AppError(dateCheck.error, 400);
   }
 
   const sqlParts = [

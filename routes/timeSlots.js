@@ -1,10 +1,30 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { validateBody, validateQuery, AppError, validateTimeFormat } = require('../middleware/validate');
 const { run, get, all } = require('../db');
 
 const router = express.Router();
 
-router.get('/', authenticateToken, (req, res) => {
+const listQuerySchema = {
+  room_id: { type: 'integer', label: '房间ID' }
+};
+
+const createSchema = {
+  room_id: { required: true, type: 'integer', label: '房间ID' },
+  start_time: { required: true, type: 'string', custom: (v) => validateTimeFormat(v) ? null : '时间格式无效，请使用 HH:MM 格式', label: '开始时间' },
+  end_time: { required: true, type: 'string', custom: (v) => validateTimeFormat(v) ? null : '时间格式无效，请使用 HH:MM 格式', label: '结束时间' },
+  day_of_week: { type: 'integer', min: 0, max: 6, label: '星期几' },
+  is_recurring: { type: 'boolean', label: '是否重复' }
+};
+
+const updateSchema = {
+  start_time: { type: 'string', custom: (v) => v === undefined || validateTimeFormat(v) ? null : '时间格式无效，请使用 HH:MM 格式', label: '开始时间' },
+  end_time: { type: 'string', custom: (v) => v === undefined || validateTimeFormat(v) ? null : '时间格式无效，请使用 HH:MM 格式', label: '结束时间' },
+  day_of_week: { type: 'integer', min: 0, max: 6, label: '星期几' },
+  is_recurring: { type: 'boolean', label: '是否重复' }
+};
+
+router.get('/', authenticateToken, validateQuery(listQuerySchema), (req, res) => {
   const { room_id } = req.query;
   let sql = 'SELECT ts.*, r.name as room_name FROM time_slots ts JOIN rooms r ON ts.room_id = r.id';
   let params = [];
@@ -25,76 +45,46 @@ router.get('/:id', authenticateToken, (req, res) => {
     [req.params.id]
   );
   if (!slot) {
-    return res.status(404).json({ error: '时段不存在' });
+    throw new AppError('时段不存在', 404);
   }
   res.json(slot);
 });
 
-router.post('/', authenticateToken, requireAdmin, (req, res) => {
+router.post('/', authenticateToken, requireAdmin, validateBody(createSchema), (req, res) => {
   const { room_id, start_time, end_time, day_of_week, is_recurring = 0 } = req.body;
-
-  if (!room_id || !start_time || !end_time) {
-    return res.status(400).json({ error: '房间ID、开始时间和结束时间不能为空' });
-  }
 
   const room = get('SELECT id FROM rooms WHERE id = ?', [room_id]);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
-  }
-
-  const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-  if (!timeRegex.test(start_time) || !timeRegex.test(end_time)) {
-    return res.status(400).json({ error: '时间格式应为 HH:MM' });
+    throw new AppError('房间不存在', 404);
   }
 
   if (start_time >= end_time) {
-    return res.status(400).json({ error: '开始时间必须早于结束时间' });
+    throw new AppError('开始时间必须早于结束时间', 400);
   }
 
-  if (day_of_week !== undefined && (day_of_week < 0 || day_of_week > 6)) {
-    return res.status(400).json({ error: 'day_of_week 应为 0-6（周日到周六）' });
-  }
+  const result = run(
+    `INSERT INTO time_slots (room_id, start_time, end_time, day_of_week, is_recurring)
+     VALUES (?, ?, ?, ?, ?)`,
+    [room_id, start_time, end_time, day_of_week !== undefined ? day_of_week : null, is_recurring ? 1 : 0]
+  );
 
-  try {
-    const result = run(
-      `INSERT INTO time_slots (room_id, start_time, end_time, day_of_week, is_recurring)
-       VALUES (?, ?, ?, ?, ?)`,
-      [room_id, start_time, end_time, day_of_week !== undefined ? day_of_week : null, is_recurring ? 1 : 0]
-    );
-
-    const slot = get('SELECT * FROM time_slots WHERE id = ?', [result.lastInsertRowid]);
-    res.status(201).json(slot);
-  } catch (err) {
-    if (err.message.includes('UNIQUE constraint')) {
-      return res.status(400).json({ error: '该时段已存在' });
-    }
-    throw err;
-  }
+  const slot = get('SELECT * FROM time_slots WHERE id = ?', [result.lastInsertRowid]);
+  res.status(201).json(slot);
 });
 
-router.put('/:id', authenticateToken, requireAdmin, (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, validateBody(updateSchema), (req, res) => {
   const { id } = req.params;
   const { start_time, end_time, day_of_week, is_recurring } = req.body;
 
   const slot = get('SELECT * FROM time_slots WHERE id = ?', [id]);
   if (!slot) {
-    return res.status(404).json({ error: '时段不存在' });
+    throw new AppError('时段不存在', 404);
   }
 
-  if (start_time || end_time) {
-    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-    if ((start_time && !timeRegex.test(start_time)) || (end_time && !timeRegex.test(end_time))) {
-      return res.status(400).json({ error: '时间格式应为 HH:MM' });
-    }
-    const newStart = start_time || slot.start_time;
-    const newEnd = end_time || slot.end_time;
-    if (newStart >= newEnd) {
-      return res.status(400).json({ error: '开始时间必须早于结束时间' });
-    }
-  }
-
-  if (day_of_week !== undefined && (day_of_week < 0 || day_of_week > 6)) {
-    return res.status(400).json({ error: 'day_of_week 应为 0-6（周日到周六）' });
+  const newStart = start_time || slot.start_time;
+  const newEnd = end_time || slot.end_time;
+  if (newStart >= newEnd) {
+    throw new AppError('开始时间必须早于结束时间', 400);
   }
 
   run(
@@ -116,7 +106,7 @@ router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
 
   const slot = get('SELECT * FROM time_slots WHERE id = ?', [id]);
   if (!slot) {
-    return res.status(404).json({ error: '时段不存在' });
+    throw new AppError('时段不存在', 404);
   }
 
   run('DELETE FROM time_slots WHERE id = ?', [id]);

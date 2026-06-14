@@ -1,39 +1,52 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { validateBody, AppError } = require('../middleware/validate');
 const { run, get, all } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 
 const router = express.Router();
 
+const createSchema = {
+  rule_name: { required: true, type: 'string', minLength: 1, label: '规则名称' },
+  rule_type: { required: true, type: 'string', minLength: 1, label: '规则类型' },
+  config: { type: 'object', label: '配置' },
+  is_enabled: { type: 'boolean', label: '是否启用' }
+};
+
+const updateSchema = {
+  rule_name: { type: 'string', minLength: 1, label: '规则名称' },
+  rule_type: { type: 'string', minLength: 1, label: '规则类型' },
+  config: { type: 'object', label: '配置' },
+  is_enabled: { type: 'boolean', label: '是否启用' }
+};
+
+function parseConfig(rule) {
+  if (!rule) return null;
+  return {
+    ...rule,
+    config: rule.config ? JSON.parse(rule.config) : null
+  };
+}
+
 router.get('/', authenticateToken, requireAdmin, (req, res) => {
   const rules = all('SELECT * FROM approval_rules ORDER BY created_at DESC');
-  res.json(rules.map(r => ({
-    ...r,
-    config: r.config ? JSON.parse(r.config) : null
-  })));
+  res.json(rules.map(parseConfig));
 });
 
 router.get('/:id', authenticateToken, requireAdmin, (req, res) => {
   const rule = get('SELECT * FROM approval_rules WHERE id = ?', [req.params.id]);
   if (!rule) {
-    return res.status(404).json({ error: '规则不存在' });
+    throw new AppError('规则不存在', 404);
   }
-  res.json({
-    ...rule,
-    config: rule.config ? JSON.parse(rule.config) : null
-  });
+  res.json(parseConfig(rule));
 });
 
-router.post('/', authenticateToken, requireAdmin, (req, res) => {
+router.post('/', authenticateToken, requireAdmin, validateBody(createSchema), (req, res) => {
   const { rule_name, rule_type, config, is_enabled = true } = req.body;
-
-  if (!rule_name || !rule_type) {
-    return res.status(400).json({ error: '规则名称和类型不能为空' });
-  }
 
   const existing = get('SELECT id FROM approval_rules WHERE rule_name = ?', [rule_name]);
   if (existing) {
-    return res.status(400).json({ error: '规则名称已存在' });
+    throw new AppError('规则名称已存在', 400);
   }
 
   const configStr = config ? JSON.stringify(config) : null;
@@ -50,25 +63,22 @@ router.post('/', authenticateToken, requireAdmin, (req, res) => {
     details: { ruleId: rule.id, rule_name, rule_type, config }
   });
 
-  res.status(201).json({
-    ...rule,
-    config: rule.config ? JSON.parse(rule.config) : null
-  });
+  res.status(201).json(parseConfig(rule));
 });
 
-router.put('/:id', authenticateToken, requireAdmin, (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, validateBody(updateSchema), (req, res) => {
   const { id } = req.params;
   const { rule_name, rule_type, config, is_enabled } = req.body;
 
   const rule = get('SELECT * FROM approval_rules WHERE id = ?', [id]);
   if (!rule) {
-    return res.status(404).json({ error: '规则不存在' });
+    throw new AppError('规则不存在', 404);
   }
 
   if (rule_name && rule_name !== rule.rule_name) {
     const existing = get('SELECT id FROM approval_rules WHERE rule_name = ? AND id != ?', [rule_name, id]);
     if (existing) {
-      return res.status(400).json({ error: '规则名称已存在' });
+      throw new AppError('规则名称已存在', 400);
     }
   }
 
@@ -90,10 +100,7 @@ router.put('/:id', authenticateToken, requireAdmin, (req, res) => {
     details: { ruleId: id, changes: req.body }
   });
 
-  res.json({
-    ...updated,
-    config: updated.config ? JSON.parse(updated.config) : null
-  });
+  res.json(parseConfig(updated));
 });
 
 router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
@@ -101,7 +108,7 @@ router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
 
   const rule = get('SELECT * FROM approval_rules WHERE id = ?', [id]);
   if (!rule) {
-    return res.status(404).json({ error: '规则不存在' });
+    throw new AppError('规则不存在', 404);
   }
 
   run('DELETE FROM approval_rules WHERE id = ?', [id]);

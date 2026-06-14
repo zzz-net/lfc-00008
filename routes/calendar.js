@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { AppError } = require('../middleware/validate');
 const { run, get, all } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 const { generateSingleIcs, generateSubscriptionIcs, generateRoomIcs, generateSubscriptionToken } = require('../utils/ics');
@@ -61,11 +62,11 @@ router.get('/reservation/:id/ics', authenticateToken, (req, res) => {
 
   const reservation = getReservationWithDetails(id);
   if (!reservation) {
-    return res.status(404).json({ error: '预约不存在' });
+    throw new AppError('预约不存在', 404);
   }
 
   if (req.user.role !== 'admin' && reservation.user_id !== req.user.id) {
-    return res.status(403).json({ error: '无权导出此预约' });
+    throw new AppError('无权导出此预约', 403);
   }
 
   const ics = generateSingleIcs(reservation);
@@ -112,7 +113,7 @@ router.get('/subscribe/feed/:token', (req, res) => {
   );
 
   if (!subscription) {
-    return res.status(404).json({ error: '订阅链接无效或已撤销' });
+    throw new AppError('订阅链接无效或已撤销', 404);
   }
 
   const reservations = getUserReservations(subscription.user_id);
@@ -216,7 +217,7 @@ router.delete('/subscribe', authenticateToken, (req, res) => {
   );
 
   if (!existing) {
-    return res.status(404).json({ error: '没有有效的订阅链接' });
+    throw new AppError('没有有效的订阅链接', 404);
   }
 
   run(
@@ -235,29 +236,12 @@ router.delete('/subscribe', authenticateToken, (req, res) => {
   res.json({ message: '订阅链接已撤销' });
 });
 
-router.get('/subscribe/status', authenticateToken, (req, res) => {
-  const existing = get(
-    'SELECT token, is_active, created_at FROM calendar_subscriptions WHERE user_id = ? AND is_active = 1',
-    [req.user.id]
-  );
-
-  if (!existing) {
-    return res.json({ active: false });
-  }
-
-  res.json({
-    active: true,
-    subscription_url: `/api/calendar/subscribe/feed/${existing.token}`,
-    created_at: existing.created_at
-  });
-});
-
 router.get('/rooms/:id/ics', authenticateToken, requireAdmin, (req, res) => {
   const { id } = req.params;
 
   const room = get('SELECT * FROM rooms WHERE id = ?', [id]);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
+    throw new AppError('房间不存在', 404);
   }
 
   const reservations = getRoomReservations(id);

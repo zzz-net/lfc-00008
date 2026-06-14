@@ -1,11 +1,32 @@
 const express = require('express');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { validateBody, validateQuery, AppError } = require('../middleware/validate');
 const { run, get, all } = require('../db');
 const { logAudit, ACTIONS } = require('../utils/audit');
 
 const router = express.Router();
 
-router.get('/', authenticateToken, (req, res) => {
+const listQuerySchema = {
+  status: { type: 'string', enum: ['active', 'inactive'], label: '状态' }
+};
+
+const createSchema = {
+  name: { required: true, type: 'string', minLength: 1, label: '房间名称' },
+  description: { type: 'string', label: '描述' },
+  capacity: { type: 'integer', min: 1, label: '容量' },
+  location: { type: 'string', label: '位置' },
+  status: { type: 'string', enum: ['active', 'inactive'], label: '状态' }
+};
+
+const updateSchema = {
+  name: { type: 'string', minLength: 1, label: '房间名称' },
+  description: { type: 'string', label: '描述' },
+  capacity: { type: 'integer', min: 1, label: '容量' },
+  location: { type: 'string', label: '位置' },
+  status: { type: 'string', enum: ['active', 'inactive'], label: '状态' }
+};
+
+router.get('/', authenticateToken, validateQuery(listQuerySchema), (req, res) => {
   const { status } = req.query;
   let sql = 'SELECT * FROM rooms';
   let params = [];
@@ -23,21 +44,17 @@ router.get('/', authenticateToken, (req, res) => {
 router.get('/:id', authenticateToken, (req, res) => {
   const room = get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
+    throw new AppError('房间不存在', 404);
   }
   res.json(room);
 });
 
-router.post('/', authenticateToken, requireAdmin, (req, res) => {
+router.post('/', authenticateToken, requireAdmin, validateBody(createSchema), (req, res) => {
   const { name, description, capacity, location, status = 'active' } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ error: '房间名称不能为空' });
-  }
 
   const existing = get('SELECT id FROM rooms WHERE name = ?', [name]);
   if (existing) {
-    return res.status(400).json({ error: '房间名称已存在' });
+    throw new AppError('房间名称已存在', 400);
   }
 
   const result = run(
@@ -55,19 +72,19 @@ router.post('/', authenticateToken, requireAdmin, (req, res) => {
   res.status(201).json(room);
 });
 
-router.put('/:id', authenticateToken, requireAdmin, (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, validateBody(updateSchema), (req, res) => {
   const { id } = req.params;
   const { name, description, capacity, location, status } = req.body;
 
   const room = get('SELECT * FROM rooms WHERE id = ?', [id]);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
+    throw new AppError('房间不存在', 404);
   }
 
   if (name && name !== room.name) {
     const existing = get('SELECT id FROM rooms WHERE name = ? AND id != ?', [name, id]);
     if (existing) {
-      return res.status(400).json({ error: '房间名称已存在' });
+      throw new AppError('房间名称已存在', 400);
     }
   }
 
@@ -97,7 +114,7 @@ router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
 
   const room = get('SELECT * FROM rooms WHERE id = ?', [id]);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
+    throw new AppError('房间不存在', 404);
   }
 
   const pendingReservations = get(
@@ -107,7 +124,7 @@ router.delete('/:id', authenticateToken, requireAdmin, (req, res) => {
   );
   
   if (pendingReservations.count > 0) {
-    return res.status(400).json({ error: '该房间存在待处理或已批准的预约，无法删除' });
+    throw new AppError('该房间存在待处理或已批准的预约，无法删除', 400);
   }
 
   run('DELETE FROM rooms WHERE id = ?', [id]);

@@ -2,6 +2,7 @@ const express = require('express');
 const { initDatabase } = require('./db');
 const { PORT } = require('./config');
 const { startExpireScheduler } = require('./utils/expire');
+const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms');
@@ -40,14 +41,8 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/templates', templateRoutes);
 
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ error: '服务器内部错误', message: err.message });
-});
-
-app.use((req, res) => {
-  res.status(404).json({ error: '接口不存在' });
-});
+app.use(errorHandler);
+app.use(notFoundHandler);
 
 initDatabase();
 
