@@ -32,7 +32,13 @@ const ACTIONS = {
   CALENDAR_SUBSCRIBE_ACCESS: 'calendar_subscribe_access',
   CALENDAR_SUBSCRIBE_REGENERATE: 'calendar_subscribe_regenerate',
   CALENDAR_SUBSCRIBE_REVOKE: 'calendar_subscribe_revoke',
-  CALENDAR_ROOM_EXPORT_ICS: 'calendar_room_export_ics'
+  CALENDAR_ROOM_EXPORT_ICS: 'calendar_room_export_ics',
+  CREATE_TEMPLATE: 'create_template',
+  UPDATE_TEMPLATE: 'update_template',
+  DELETE_TEMPLATE: 'delete_template',
+  CREATE_RESERVATION_FROM_TEMPLATE: 'create_reservation_from_template',
+  EXPORT_TEMPLATE: 'export_template',
+  IMPORT_TEMPLATE: 'import_template'
 };
 
 module.exports = {

@@ -1,0 +1,114 @@
+========================================
+  预约模板功能 - CURL 测试示例
+========================================
+
+首先登录获取token：
+-------------------
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user1","password":"user123"}'
+
+# 保存返回的 token
+USER1_TOKEN="你的token"
+USER2_TOKEN="user2的token"
+ADMIN_TOKEN="admin的token"
+
+1. 创建模板
+-----------
+curl -X POST http://localhost:3000/api/templates \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d '{
+    "name": "周例会模板",
+    "tags": ["会议", "每周", "团队"],
+    "room_id": 1,
+    "start_time": "09:00",
+    "end_time": "10:00",
+    "day_of_week": 1,
+    "purpose": "团队周例会",
+    "attendees": 8,
+    "config": {"needsProjector": true}
+  }'
+
+2. 查询我的模板列表
+-------------------
+curl -H "Authorization: Bearer $USER1_TOKEN" \
+  http://localhost:3000/api/templates
+
+3. 按标签筛选模板
+-----------------
+curl -H "Authorization: Bearer $USER1_TOKEN" \
+  "http://localhost:3000/api/templates?tag=会议"
+
+4. 获取单个模板详情
+-------------------
+curl -H "Authorization: Bearer $USER1_TOKEN" \
+  http://localhost:3000/api/templates/1
+
+5. 更新模板
+-----------
+curl -X PUT http://localhost:3000/api/templates/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d '{
+    "purpose": "团队周例会 - 更新",
+    "attendees": 10,
+    "tags": ["会议", "每周", "核心团队"]
+  }'
+
+6. 从模板创建预约（成功场景）
+-----------------------------
+# 注意：把日期改成未来的周一
+curl -X POST http://localhost:3000/api/templates/1/create-reservation \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d '{"date": "2026-07-13"}'
+
+7. 从模板创建预约（冲突场景，再约一次）
+---------------------------------------
+curl -X POST http://localhost:3000/api/templates/1/create-reservation \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d '{"date": "2026-07-13"}'
+
+8. 从模板创建预约（星期不匹配）
+-------------------------------
+# 用周二的日期，模板限定周一
+curl -X POST http://localhost:3000/api/templates/1/create-reservation \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d '{"date": "2026-07-14"}'
+
+9. 导出模板为JSON
+-----------------
+curl -H "Authorization: Bearer $USER1_TOKEN" \
+  http://localhost:3000/api/templates/1/export \
+  -o template_export.json
+
+10. 从JSON导入模板
+------------------
+# 先修改导出的文件中的模板名称，避免重名
+curl -X POST http://localhost:3000/api/templates/import \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $USER1_TOKEN" \
+  -d @template_export.json
+
+11. 用户2尝试查看用户1的模板（应该被拒绝）
+-----------------------------------------
+curl -H "Authorization: Bearer $USER2_TOKEN" \
+  http://localhost:3000/api/templates/1
+
+12. 管理员查看所有模板
+---------------------
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/templates
+
+13. 删除模板
+-----------
+curl -X DELETE http://localhost:3000/api/templates/1 \
+  -H "Authorization: Bearer $USER1_TOKEN"
+
+14. 查看audit log中的模板相关操作
+---------------------------------
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:3000/api/audit-logs?limit=20"

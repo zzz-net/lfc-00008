@@ -43,6 +43,35 @@ function migrateColumns() {
     `);
     console.log('Created calendar_subscriptions table');
   }
+
+  const templateTableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='reservation_templates'"
+  ).get();
+  if (!templateTableExists) {
+    db.exec(`
+      CREATE TABLE reservation_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        tags TEXT,
+        room_id INTEGER NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        day_of_week INTEGER,
+        purpose TEXT,
+        attendees INTEGER,
+        config TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+        UNIQUE(user_id, name)
+      );
+      CREATE INDEX idx_templates_user ON reservation_templates(user_id);
+      CREATE INDEX idx_templates_room ON reservation_templates(room_id);
+    `);
+    console.log('Created reservation_templates table');
+  }
 }
 
 function initDatabase() {
