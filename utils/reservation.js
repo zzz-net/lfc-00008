@@ -20,6 +20,7 @@ function generateRecurringDates(startDatetime, endDatetime, pattern, occurrences
   const start = new Date(startDatetime);
   const end = new Date(endDatetime);
   const durationMs = end.getTime() - start.getTime();
+  const originalDay = start.getDate();
 
   for (let i = 0; i < occurrences; i++) {
     const currentStart = new Date(start);
@@ -35,7 +36,11 @@ function generateRecurringDates(startDatetime, endDatetime, pattern, occurrences
         currentStart.setDate(currentStart.getDate() + i * 14);
         break;
       case RECURRING_PATTERNS.MONTHLY:
-        currentStart.setMonth(currentStart.getMonth() + i);
+        currentStart.setDate(1);
+        currentStart.setMonth(start.getMonth() + i);
+        const lastDayOfTargetMonth = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 0).getDate();
+        currentStart.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+        currentStart.setHours(start.getHours(), start.getMinutes(), start.getSeconds(), start.getMilliseconds());
         break;
     }
 

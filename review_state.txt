@@ -1,0 +1,3 @@
+room_id=25
+m31_series=sr_9c224ea5eb01d135290e9b65
+before_count=20
